@@ -1,0 +1,185 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel} -d ${POSTGRES_DB:-sentinel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-sentinel}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-sentinel}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infrastructure/postgres/Dockerfile.migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "on-failure"
+
+  seed:
+    build:
+      context: .
+      dockerfile: infrastructure/postgres/Dockerfile.seed
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      ORDERS_URL: http://orders:8001
+      GATEWAY_HTTP_TIMEOUT_SECONDS: ${GATEWAY_HTTP_TIMEOUT_SECONDS:-10.0}
+    depends_on:
+      orders:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  orders:
+    build:
+      context: .
+      dockerfile: services/orders/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
+      INVENTORY_URL: http://inventory:8002
+      PAYMENTS_URL: http://payments:8003
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-5.0}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://sentinel:sentinel@rabbitmq:5672/}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-sentinel.events}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+      inventory:
+        condition: service_healthy
+      payments:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  inventory:
+    build:
+      context: .
+      dockerfile: services/inventory/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      INVENTORY_CACHE_TTL_SECONDS: ${INVENTORY_CACHE_TTL_SECONDS:-60}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  payments:
+    build:
+      context: .
+      dockerfile: services/payments/Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  notifications:
+    build:
+      context: .
+      dockerfile: services/notifications/Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://sentinel:sentinel@rabbitmq:5672/}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-sentinel.events}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  postgres_data:

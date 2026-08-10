@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/htmlcov
+**/.coverage
+docs
+chaos
+apps
+*.md
+.cursor
