@@ -67,6 +67,7 @@ Do not commit real secrets.
 | POST | `/orders` | gateway, orders |
 | GET | `/inventory/{product_id}` | inventory |
 | POST | `/inventory/reserve` | inventory |
+| POST | `/inventory/release` | inventory (compensating restore) |
 | POST | `/payments` | payments (always SUCCESS) |
 | POST | `/payments/simulate-failure` | payments (FAILED; test/dev only) |
 | GET | `/notifications/received` | notifications (debug) |
@@ -88,10 +89,13 @@ curl -s http://localhost:8000/orders \
 
 1. Gateway validates `CreateOrderRequest` and forwards to Orders over HTTP (timeout enforced).
 2. Orders inserts an order (`pending`), reserves inventory, charges payment, updates status (`reserved` → `confirmed` or `failed`).
-3. On confirmation, Orders publishes `order.created` to exchange `sentinel.events`.
-4. Notifications consumes queue `order.created` and records the event in memory.
+3. If payment fails (or a later reserve fails) after inventory was reserved, Orders calls `/inventory/release` to restore stock.
+4. On confirmation, Orders publishes `order.created` to exchange `sentinel.events`.
+5. Notifications consumes queue `order.created` and records the event in memory.
 
-Inventory GET is a read-through Redis cache (TTL 60s by default) backed by PostgreSQL. Reserve uses `SELECT … FOR UPDATE` and refreshes the cache.
+Inventory GET is a read-through Redis cache (TTL 60s by default) backed by PostgreSQL. Reserve uses `SELECT … FOR UPDATE` and refreshes the cache. Release is the compensating inverse of reserve.
+
+Optional request field `simulate_payment_failure: true` (test/dev) makes Orders call `/payments/simulate-failure` so compensation can be exercised end-to-end. Idempotent order creation is not implemented yet.
 
 ## Make targets
 
@@ -124,7 +128,7 @@ Covers health checks, Redis cache miss/hit, inventory reserve/oversell, payment 
 
 ## Database schema
 
-- `orders(id, customer_id, status, amount, created_at)`
+- `orders(id, customer_id, status, amount, payment_id → payments.id, created_at)`
 - `payments(id, order_id → orders.id, status, amount, created_at)`
 - `inventory(id, product_id UNIQUE, available_quantity, updated_at)`
 

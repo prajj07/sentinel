@@ -117,6 +117,52 @@ def test_payment_success_and_simulate_failure(http: httpx.Client) -> None:
     assert failed.json()["status"] == "FAILED"
 
 
+def test_payment_failure_releases_inventory(http: httpx.Client) -> None:
+    product_id = "prod_001"
+    before = http.get(f"{INVENTORY_URL}/inventory/{product_id}")
+    assert before.status_code == 200
+    available_before = before.json()["available_quantity"]
+
+    response = http.post(
+        f"{GATEWAY_URL}/orders",
+        json={
+            "customer_id": "cust_compensation",
+            "items": [{"product_id": product_id, "quantity": 3}],
+            "amount": 999,
+            "simulate_payment_failure": True,
+        },
+    )
+    assert response.status_code == 402, response.text
+    detail = response.json()["detail"]
+    assert "Payment failed" in detail["message"]
+
+    after = http.get(f"{INVENTORY_URL}/inventory/{product_id}")
+    assert after.status_code == 200
+    assert after.json()["available_quantity"] == available_before
+
+
+def test_inventory_release_endpoint(http: httpx.Client) -> None:
+    product_id = "prod_002"
+    before = http.get(f"{INVENTORY_URL}/inventory/{product_id}")
+    assert before.status_code == 200
+    available = before.json()["available_quantity"]
+
+    reserved = http.post(
+        f"{INVENTORY_URL}/inventory/reserve",
+        json={"product_id": product_id, "quantity": 2},
+    )
+    assert reserved.status_code == 200
+    assert reserved.json()["available_quantity"] == available - 2
+
+    released = http.post(
+        f"{INVENTORY_URL}/inventory/release",
+        json={"product_id": product_id, "quantity": 2},
+    )
+    assert released.status_code == 200
+    assert released.json()["available_quantity"] == available
+    assert released.json()["released_quantity"] == 2
+
+
 def test_order_creation_flow_and_rabbitmq(http: httpx.Client) -> None:
     http.delete(f"{NOTIFICATIONS_URL}/notifications/received")
 

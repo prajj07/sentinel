@@ -25,7 +25,12 @@ async def create_order(payload: CreateOrderRequest) -> CreateOrderResponse:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     if status_code >= 400:
-        detail = body if isinstance(body, (dict, list, str)) else "Orders service error"
+        if isinstance(body, dict) and "detail" in body:
+            detail = body["detail"]
+        elif isinstance(body, (dict, list, str)):
+            detail = body
+        else:
+            detail = "Orders service error"
         raise HTTPException(status_code=status_code, detail=detail)
 
     return CreateOrderResponse.model_validate(body)

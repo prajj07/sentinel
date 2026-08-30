@@ -13,6 +13,8 @@ class CreateOrderRequest(BaseModel):
     customer_id: str = Field(min_length=1)
     items: list[OrderItem] = Field(min_length=1)
     amount: int = Field(gt=0)
+    # Test/dev only: Orders calls payments simulate-failure instead of SUCCESS path
+    simulate_payment_failure: bool = False
 
 
 class CreateOrderResponse(BaseModel):
@@ -32,6 +34,17 @@ class ReserveInventoryRequest(BaseModel):
 class ReserveInventoryResponse(BaseModel):
     product_id: str
     reserved_quantity: int
+    available_quantity: int
+
+
+class ReleaseInventoryRequest(BaseModel):
+    product_id: str = Field(min_length=1)
+    quantity: int = Field(gt=0)
+
+
+class ReleaseInventoryResponse(BaseModel):
+    product_id: str
+    released_quantity: int
     available_quantity: int
 
 

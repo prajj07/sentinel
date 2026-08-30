@@ -13,6 +13,8 @@ from sentinel_common.redis_cache import (
 )
 from sentinel_contracts.orders import (
     InventoryResponse,
+    ReleaseInventoryRequest,
+    ReleaseInventoryResponse,
     ReserveInventoryRequest,
     ReserveInventoryResponse,
 )
@@ -90,5 +92,40 @@ def reserve_inventory(
     return ReserveInventoryResponse(
         product_id=item.product_id,
         reserved_quantity=payload.quantity,
+        available_quantity=item.available_quantity,
+    )
+
+
+@router.post("/inventory/release", response_model=ReleaseInventoryResponse)
+def release_inventory(
+    payload: ReleaseInventoryRequest,
+    session: Session = Depends(get_session),
+) -> ReleaseInventoryResponse:
+    """Return previously reserved stock (compensating action)."""
+    item = session.scalar(
+        select(InventoryItem)
+        .where(InventoryItem.product_id == payload.product_id)
+        .with_for_update()
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Product '{payload.product_id}' not found")
+
+    item.available_quantity += payload.quantity
+    item.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(item)
+
+    invalidate_cached_inventory(payload.product_id)
+    set_cached_inventory(
+        payload.product_id,
+        {
+            "product_id": item.product_id,
+            "available_quantity": item.available_quantity,
+        },
+    )
+
+    return ReleaseInventoryResponse(
+        product_id=item.product_id,
+        released_quantity=payload.quantity,
         available_quantity=item.available_quantity,
     )

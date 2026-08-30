@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "sentinel-observability"
 version = "0.1.0"
 description = "Observability stubs for Sentinel (Sprint 1 placeholder)"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = []
 
 [tool.setuptools.packages.find]

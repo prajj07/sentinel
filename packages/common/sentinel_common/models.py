@@ -20,6 +20,12 @@ class Order(Base):
     customer_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("payments.id", ondelete="SET NULL", use_alter=True, name="fk_orders_payment_id"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -27,7 +33,10 @@ class Order(Base):
         default=utc_now,
     )
 
-    payments: Mapped[list["Payment"]] = relationship(back_populates="order")
+    payments: Mapped[list["Payment"]] = relationship(
+        back_populates="order",
+        foreign_keys="Payment.order_id",
+    )
 
 
 class Payment(Base):
@@ -49,7 +58,10 @@ class Payment(Base):
         default=utc_now,
     )
 
-    order: Mapped["Order"] = relationship(back_populates="payments")
+    order: Mapped["Order"] = relationship(
+        back_populates="payments",
+        foreign_keys=[order_id],
+    )
 
 
 class InventoryItem(Base):
