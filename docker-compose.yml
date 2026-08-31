@@ -4,6 +4,7 @@ x-otel-environment: &otel-environment
   OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-none}
   OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-none}
   OTEL_ENABLED: ${OTEL_ENABLED:-true}
+  CHAOS_ENABLED: ${CHAOS_ENABLED:-true}
 
 services:
   postgres:
@@ -66,9 +67,12 @@ services:
       dockerfile: infrastructure/postgres/Dockerfile.seed
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: "no"
 
   tempo:
@@ -224,6 +228,36 @@ services:
       retries: 10
       start_period: 15s
 
+  chaos:
+    build:
+      context: .
+      dockerfile: services/chaos/Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: chaos
+      CHAOS_ENABLED: ${CHAOS_ENABLED:-true}
+      GATEWAY_URL: http://gateway:8000
+      ORDERS_URL: http://orders:8001
+      INVENTORY_URL: http://inventory:8002
+      PAYMENTS_URL: http://payments:8003
+    depends_on:
+      gateway:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+      payments:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   prometheus:
     image: prom/prometheus:v2.54.1
     volumes:
@@ -234,6 +268,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
     depends_on:
       gateway:
         condition: service_healthy
@@ -244,6 +279,8 @@ services:
       payments:
         condition: service_healthy
       notifications:
+        condition: service_healthy
+      chaos:
         condition: service_healthy
 
   grafana:

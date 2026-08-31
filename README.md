@@ -1,6 +1,6 @@
 # Sentinel
 
-Autonomous production reliability platform — Sprint 1 establishes a real local distributed system you can observe and intentionally break in later sprints.
+Autonomous production reliability platform — Sprints 1–3: a real local distributed system with traces, metrics, and a chaos engine that can break it on purpose.
 
 ## Architecture
 
@@ -17,6 +17,8 @@ Orders (:8001)
   │
   ▼
 RabbitMQ ──► Notifications (:8004)
+
+Chaos Engine (:8005) ── inject/stop ──► gateway / orders / inventory / payments
 ```
 
 - **Sync path:** Client → Gateway → Orders → Inventory + Payments
@@ -32,6 +34,7 @@ RabbitMQ ──► Notifications (:8004)
 | inventory | 8002 | Stock lookup/reserve + Redis cache |
 | payments | 8003 | Simulated payments (SUCCESS / FAILED) |
 | notifications | 8004 | Consumes `order.created` |
+| chaos | 8005 | Experiment control plane (dev only) |
 
 Infrastructure: PostgreSQL (`5432`), Redis (`6379`), RabbitMQ (`5672` / management `15672`).
 
@@ -72,6 +75,11 @@ Do not commit real secrets.
 | POST | `/payments/simulate-failure` | payments (FAILED; test/dev only) |
 | GET | `/notifications/received` | notifications (debug) |
 | DELETE | `/notifications/received` | notifications (debug) |
+| GET | `/metrics` | all |
+| POST | `/chaos/inject` | chaos |
+| POST | `/chaos/stop/{experiment_id}` | chaos |
+| GET | `/chaos/experiments` | chaos |
+| POST | `/chaos/scenarios/payment-degradation` | chaos |
 
 ### Create order example
 
@@ -109,6 +117,8 @@ make seed     # seed inventory
 make test     # integration tests (stack must be up)
 make ps       # container status
 make obs-urls # Prometheus / Grafana / Tempo URLs
+make chaos-urls
+make chaos-scenario  # run payment-degradation experiment
 ```
 
 ## Observability (Sprint 2)
@@ -155,11 +165,43 @@ With the stack running:
 make test
 ```
 
-Covers health checks, Redis cache, compensation, observability (`tests/test_observability.py`), and the full order flow.
+Covers health checks, Redis cache, compensation, observability (`tests/test_observability.py`), chaos (`tests/test_chaos.py`), and the full order flow.
+
+## Chaos engineering (Sprint 3)
+
+The chaos engine injects **in-process** faults (latency, HTTP 500, 503). It does not kill containers or run shell commands. `/health`, `/metrics`, and `/internal/chaos/*` are never faulted so Compose healthchecks stay green.
+
+Control API (`:8005`, local/dev only — do not expose publicly):
+
+| Method | Path |
+|--------|------|
+| POST | `/chaos/inject` |
+| POST | `/chaos/stop/{experiment_id}` |
+| GET | `/chaos/experiments` |
+| GET | `/chaos/experiments/{experiment_id}` |
+| POST | `/chaos/scenarios/payment-degradation` |
+
+```bash
+# Inject 3s payment latency for 30s
+curl -s -X POST http://localhost:8005/chaos/inject \
+  -H 'Content-Type: application/json' \
+  -d '{"service":"payments","type":"latency","duration_seconds":30,"delay_ms":3000}'
+
+# Stop
+curl -s -X POST http://localhost:8005/chaos/stop/exp_xxxxxxxx
+
+# Automated experiment + report
+make chaos-scenario
+bash scripts/verify_chaos.sh
+```
+
+Fault types: `latency`, `http_500`, `service_unavailable`. Target services: `gateway`, `orders`, `inventory`, `payments`.
+
+Affected requests get span attributes `chaos.experiment_id` and `chaos.failure_type` so Tempo can distinguish **intentional** breakage from unexpected incidents.
 
 ## Out of scope (current)
 
-Idempotency keys, chaos engine, AI incident commander, Kubernetes, AWS, Loki/log aggregation.
+Idempotency keys, AI incident commander, Kubernetes, AWS, Loki/log aggregation, Control Room UI.
 
 ## RabbitMQ topology
 

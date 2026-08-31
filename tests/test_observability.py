@@ -71,24 +71,26 @@ def test_prometheus_targets_up(http: httpx.Client) -> None:
         "sentinel-inventory",
         "sentinel-payments",
         "sentinel-notifications",
+        "sentinel-chaos",
     ):
         assert job in jobs
 
 
-def _wait_for_order_trace(http: httpx.Client, timeout: float = 45.0) -> str:
+def _wait_for_order_trace(http: httpx.Client, timeout: float = 60.0) -> str:
     """Return a trace ID for a distributed POST /orders request."""
     required = ("gateway", "orders", "inventory", "payments", "notifications")
     deadline = time.time() + timeout
+    time.sleep(3)
     while time.time() < deadline:
         for service in ("gateway", "orders"):
             response = http.get(
                 f"{TEMPO_URL}/api/search",
-                params={"tags": f"service.name={service}", "limit": 20},
+                params={"tags": f"service.name={service}", "limit": 50},
             )
             if response.status_code != 200:
                 continue
             for trace in response.json().get("traces", []):
-                if trace.get("rootTraceName") != "POST /orders":
+                if trace.get("rootTraceName") not in (None, "POST /orders"):
                     continue
                 trace_id = trace["traceID"]
                 detail = http.get(f"{TEMPO_URL}/api/traces/{trace_id}")

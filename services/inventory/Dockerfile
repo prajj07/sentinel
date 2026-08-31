@@ -8,11 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY packages/common /packages/common
 COPY packages/contracts /packages/contracts
 COPY packages/observability /packages/observability
+COPY packages/chaos /packages/chaos
 
 RUN pip install --no-cache-dir \
     /packages/common \
     /packages/contracts \
-    /packages/observability
+    /packages/observability \
+    /packages/chaos
 
 COPY services/inventory/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt

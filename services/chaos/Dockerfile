@@ -16,11 +16,11 @@ RUN pip install --no-cache-dir \
     /packages/observability \
     /packages/chaos
 
-COPY services/orders/requirements.txt /tmp/requirements.txt
+COPY services/chaos/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-COPY services/orders/app ./app
+COPY services/chaos/app ./app
 
-EXPOSE 8001
+EXPOSE 8005
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8005"]
