@@ -108,7 +108,44 @@ make migrate  # run Alembic
 make seed     # seed inventory
 make test     # integration tests (stack must be up)
 make ps       # container status
+make obs-urls # Prometheus / Grafana / Tempo URLs
 ```
+
+## Observability (Sprint 2)
+
+Every service exports:
+
+- **Traces** → Tempo via OpenTelemetry (W3C `traceparent` across HTTP + RabbitMQ)
+- **Metrics** → `GET /metrics` (Prometheus format)
+
+| UI | URL | Default login |
+|----|-----|----------------|
+| Grafana | http://localhost:3000 | admin / admin |
+| Prometheus | http://localhost:9090 | — |
+| Tempo API | http://localhost:3200 | — |
+
+### Verify trace propagation
+
+```bash
+# Happy path order + search Tempo for linked trace
+bash scripts/verify_trace.sh
+
+# Or manually
+curl -s -X POST http://localhost:8000/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"customer_id":"cust_001","items":[{"product_id":"prod_001","quantity":1}],"amount":100}'
+
+# Grafana → Explore → Tempo → search service.name=gateway
+```
+
+### Key metrics
+
+| Metric | Service |
+|--------|---------|
+| `orders_created_total`, `orders_failed_total`, `order_duration_seconds` | orders |
+| `payments_total`, `payments_failed_total`, `payment_duration_seconds` | payments |
+| `inventory_reservations_total`, `inventory_releases_total` | inventory |
+| `http_requests_total`, `http_request_duration_seconds` | all |
 
 ## Tests
 
@@ -118,7 +155,11 @@ With the stack running:
 make test
 ```
 
-Covers health checks, Redis cache miss/hit, inventory reserve/oversell, payment SUCCESS/FAILED, and the full Gateway → Orders → Inventory → Payments → RabbitMQ → Notifications path.
+Covers health checks, Redis cache, compensation, observability (`tests/test_observability.py`), and the full order flow.
+
+## Out of scope (current)
+
+Idempotency keys, chaos engine, AI incident commander, Kubernetes, AWS, Loki/log aggregation.
 
 ## RabbitMQ topology
 
@@ -133,7 +174,3 @@ Covers health checks, Redis cache miss/hit, inventory reserve/oversell, payment 
 - `inventory(id, product_id UNIQUE, available_quantity, updated_at)`
 
 Schema is applied with Alembic (no `create_all()` at runtime).
-
-## Out of scope (Sprint 1)
-
-Dashboard, AI agent, chaos engine, Kubernetes, AWS, Terraform, OpenTelemetry, Prometheus, Grafana.

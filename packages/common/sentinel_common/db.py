@@ -7,11 +7,23 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from sentinel_common.settings import get_database_settings
 
+_engine_instrumented = False
+
 
 @lru_cache
 def get_engine() -> Engine:
+    global _engine_instrumented
     settings = get_database_settings()
-    return create_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_engine(settings.database_url, pool_pre_ping=True)
+    if not _engine_instrumented:
+        try:
+            from sentinel_observability.tracing import instrument_sqlalchemy
+
+            instrument_sqlalchemy(engine)
+            _engine_instrumented = True
+        except ImportError:
+            pass
+    return engine
 
 
 @lru_cache

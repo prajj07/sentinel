@@ -1,6 +1,11 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from sentinel_observability import (
+    INVENTORY_RELEASES,
+    INVENTORY_RESERVATION_FAILURES,
+    INVENTORY_RESERVATIONS,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -62,9 +67,11 @@ def reserve_inventory(
         .with_for_update()
     )
     if item is None:
+        INVENTORY_RESERVATION_FAILURES.inc()
         raise HTTPException(status_code=404, detail=f"Product '{payload.product_id}' not found")
 
     if item.available_quantity < payload.quantity:
+        INVENTORY_RESERVATION_FAILURES.inc()
         raise HTTPException(
             status_code=409,
             detail={
@@ -89,6 +96,7 @@ def reserve_inventory(
         },
     )
 
+    INVENTORY_RESERVATIONS.inc()
     return ReserveInventoryResponse(
         product_id=item.product_id,
         reserved_quantity=payload.quantity,
@@ -124,6 +132,7 @@ def release_inventory(
         },
     )
 
+    INVENTORY_RELEASES.inc()
     return ReleaseInventoryResponse(
         product_id=item.product_id,
         released_quantity=payload.quantity,

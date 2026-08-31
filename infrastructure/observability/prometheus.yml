@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: sentinel-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["gateway:8000"]
+        labels:
+          service: gateway
+
+  - job_name: sentinel-orders
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["orders:8001"]
+        labels:
+          service: orders
+
+  - job_name: sentinel-inventory
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["inventory:8002"]
+        labels:
+          service: inventory
+
+  - job_name: sentinel-payments
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["payments:8003"]
+        labels:
+          service: payments
+
+  - job_name: sentinel-notifications
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["notifications:8004"]
+        labels:
+          service: notifications

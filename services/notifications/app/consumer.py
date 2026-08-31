@@ -6,7 +6,12 @@ import logging
 from aio_pika.abc import AbstractIncomingMessage
 
 from app.routes.notifications import record_event
-from sentinel_common.messaging import QUEUE_ORDER_CREATED, connect_rabbitmq, declare_topology
+from sentinel_common.messaging import (
+    QUEUE_ORDER_CREATED,
+    amqp_headers_to_carrier,
+    connect_rabbitmq,
+    declare_topology,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +21,23 @@ _consumer_tag = None
 
 
 async def handle_message(message: AbstractIncomingMessage) -> None:
+    carrier = amqp_headers_to_carrier(message.headers)
+    try:
+        from sentinel_observability import start_consumer_span
+
+        span_cm = start_consumer_span(
+            "sentinel.notifications",
+            "consume order.created",
+            carrier,
+        )
+        with span_cm:
+            async with message.process():
+                payload = json.loads(message.body.decode("utf-8"))
+                record_event(payload)
+        return
+    except ImportError:
+        pass
+
     async with message.process():
         payload = json.loads(message.body.decode("utf-8"))
         record_event(payload)

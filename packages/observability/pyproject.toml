@@ -4,10 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentinel-observability"
-version = "0.1.0"
-description = "Observability stubs for Sentinel (Sprint 1 placeholder)"
+version = "0.2.0"
+description = "OpenTelemetry tracing and Prometheus metrics for Sentinel services"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "opentelemetry-api>=1.27,<2",
+  "opentelemetry-sdk>=1.27,<2",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.27,<2",
+  "opentelemetry-instrumentation-fastapi>=0.48b0,<1",
+  "opentelemetry-instrumentation-httpx>=0.48b0,<1",
+  "opentelemetry-instrumentation-sqlalchemy>=0.48b0,<1",
+  "prometheus-client>=0.21,<1",
+  "starlette>=0.40,<1",
+  "pydantic-settings>=2.0,<3",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

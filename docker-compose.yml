@@ -1,3 +1,10 @@
+x-otel-environment: &otel-environment
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4317}
+  OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
+  OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-none}
+  OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-none}
+  OTEL_ENABLED: ${OTEL_ENABLED:-true}
+
 services:
   postgres:
     image: postgres:16
@@ -64,6 +71,22 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./infrastructure/observability/tempo.yml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3200/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
   gateway:
     build:
       context: .
@@ -71,10 +94,14 @@ services:
     ports:
       - "8000:8000"
     environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: gateway
       ORDERS_URL: http://orders:8001
       GATEWAY_HTTP_TIMEOUT_SECONDS: ${GATEWAY_HTTP_TIMEOUT_SECONDS:-10.0}
     depends_on:
       orders:
+        condition: service_healthy
+      tempo:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
@@ -90,6 +117,8 @@ services:
     ports:
       - "8001:8001"
     environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: orders
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
       INVENTORY_URL: http://inventory:8002
       PAYMENTS_URL: http://payments:8003
@@ -100,6 +129,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      tempo:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -123,6 +154,8 @@ services:
     ports:
       - "8002:8002"
     environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: inventory
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       INVENTORY_CACHE_TTL_SECONDS: ${INVENTORY_CACHE_TTL_SECONDS:-60}
@@ -130,6 +163,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      tempo:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -149,9 +184,13 @@ services:
     ports:
       - "8003:8003"
     environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: payments
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://sentinel:sentinel@postgres:5432/sentinel}
     depends_on:
       postgres:
+        condition: service_healthy
+      tempo:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -169,10 +208,14 @@ services:
     ports:
       - "8004:8004"
     environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: notifications
       RABBITMQ_URL: ${RABBITMQ_URL:-amqp://sentinel:sentinel@rabbitmq:5672/}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-sentinel.events}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      tempo:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')\""]
@@ -181,5 +224,48 @@ services:
       retries: 10
       start_period: 15s
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./infrastructure/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    depends_on:
+      gateway:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+      payments:
+        condition: service_healthy
+      notifications:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./infrastructure/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_healthy
+
 volumes:
   postgres_data:
+  tempo_data:
+  prometheus_data:
+  grafana_data:

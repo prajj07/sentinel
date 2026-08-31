@@ -1,4 +1,7 @@
+import time
+
 from fastapi import APIRouter, Depends
+from sentinel_observability import PAYMENT_DURATION, PAYMENTS_FAILED, PAYMENTS_TOTAL
 from sqlalchemy.orm import Session
 
 from sentinel_common.db import get_session
@@ -13,21 +16,28 @@ def _create_payment(
     session: Session,
     status: str,
 ) -> PaymentResponse:
-    payment = Payment(
-        order_id=payload.order_id,
-        status=status,
-        amount=payload.amount,
-    )
-    session.add(payment)
-    session.commit()
-    session.refresh(payment)
-    return PaymentResponse(
-        id=payment.id,
-        order_id=payment.order_id,
-        status=payment.status,
-        amount=payment.amount,
-        created_at=payment.created_at,
-    )
+    started = time.perf_counter()
+    try:
+        payment = Payment(
+            order_id=payload.order_id,
+            status=status,
+            amount=payload.amount,
+        )
+        session.add(payment)
+        session.commit()
+        session.refresh(payment)
+        PAYMENTS_TOTAL.labels(status=status).inc()
+        if status == "FAILED":
+            PAYMENTS_FAILED.inc()
+        return PaymentResponse(
+            id=payment.id,
+            order_id=payment.order_id,
+            status=payment.status,
+            amount=payment.amount,
+            created_at=payment.created_at,
+        )
+    finally:
+        PAYMENT_DURATION.observe(time.perf_counter() - started)
 
 
 @router.post("/payments", response_model=PaymentResponse)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sentinel_observability import ORDER_DURATION, ORDERS_CREATED, ORDERS_FAILED
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -110,6 +112,7 @@ async def create_order(
     session: Session = Depends(get_session),
 ) -> CreateOrderResponse:
     settings = get_settings()
+    started = time.perf_counter()
 
     order = Order(
         customer_id=payload.customer_id,
@@ -226,8 +229,12 @@ async def create_order(
                 _mark_failed(session, order)
 
     if pending_error is not None:
+        ORDERS_FAILED.inc()
+        ORDER_DURATION.observe(time.perf_counter() - started)
         raise pending_error
 
+    ORDERS_CREATED.inc()
+    ORDER_DURATION.observe(time.perf_counter() - started)
     return CreateOrderResponse(
         id=order.id,
         customer_id=order.customer_id,

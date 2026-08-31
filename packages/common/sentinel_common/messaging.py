@@ -65,9 +65,34 @@ async def publish_event(
     payload: dict[str, Any],
 ) -> None:
     body = json.dumps(payload, default=str).encode("utf-8")
+    headers: dict[str, str] = {}
+    try:
+        from sentinel_observability.tracing import inject_trace_context
+
+        inject_trace_context(headers)
+    except ImportError:
+        pass
+
     message = Message(
         body=body,
         content_type="application/json",
         delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+        headers=headers or None,
     )
     await exchange.publish(message, routing_key=routing_key)
+
+
+def amqp_headers_to_carrier(headers: Any) -> dict[str, str]:
+    if not headers:
+        return {}
+    carrier: dict[str, str] = {}
+    for key, value in headers.items():
+        k = key.decode() if isinstance(key, bytes) else str(key)
+        if isinstance(value, bytes):
+            v = value.decode()
+        elif value is None:
+            continue
+        else:
+            v = str(value)
+        carrier[k] = v
+    return carrier
